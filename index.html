@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Image Viewer & PDF Converter</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <style>
+        /* প্রি-লোডার এবং অ্যানিমেশন স্টাইল */
+        #preloader {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100vh;
+            background-color: #3a3a3a; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 9999;
+        }
+        .ripple-container { position: relative; width: 250px; height: 250px; display: flex; justify-content: center; align-items: center; }
+        .ripple { position: absolute; border-radius: 50%; background: radial-gradient(circle, rgba(29,112,184,0.8) 0%, rgba(0,150,64,0.6) 70%, rgba(58,58,58,0) 100%); animation: waterDrop 3s cubic-bezier(0.1, 0.8, 0.3, 1) infinite; opacity: 0; }
+        .ripple:nth-child(2) { animation-delay: 1s; }
+        .ripple:nth-child(3) { animation-delay: 2s; }
+        @keyframes waterDrop { 0% { width: 0px; height: 0px; opacity: 0.8; } 100% { width: 350px; height: 350px; opacity: 0; } }
+        .preloader-logo { position: relative; z-index: 10; width: 120px; }
+        
+        /* লোডিং টেক্সট স্টাইল */
+        #loadingText {
+            display: none; color: #ffffff; font-size: 15px; font-weight: bold;
+            margin-top: 20px; font-family: sans-serif; letter-spacing: 1px;
+        }
+
+        /* হেডার ও টুলবার */
+        .main-header { background: linear-gradient(to right, #009640, #1D70B8, #003366); height: 55px; display: flex; align-items: center; justify-content: flex-end; padding: 0 20px; }
+        .logo-container img { height: 55px; object-fit: contain; }
+        .toolbar-container { background-color: #ffffff; padding: 10px 16px; border-bottom: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 5px; }
+        .toolbar-row { display: flex; align-items: center; gap: 5px; }
+        .btn-tool { background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 5px 10px; color: #334155; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; transition: all 0.2s; }
+        .btn-tool:hover { background-color: #f8fafc; border-color: #94a3b8; }
+        
+        /* কন্টেন্ট এরিয়া এবং ইমেজ কন্টেইনার */
+.content-area {
+    margin: 0;
+    padding: 0px; /* মোবাইলের জন্য প্যাডিং কমানো হলো */
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    box-sizing: border-box; /* সাইজিং ঠিক রাখার জন্য */
+    overflow: hidden;
+}
+
+.image-wrapper {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    background-color: white;
+    border-radius: 4px;
+    display: inline-block;
+    max-width: 100%; /* মোবাইলে যাতে স্ক্রিনের বাইরে না যায় */
+    transition: transform 0.3s ease, filter 0.3s ease;
+}
+
+#mainImage {
+    max-width: 100%; /* ইমেজ যেন কন্টেইনারের বাইরে না যায় */
+    height: auto;    /* ইমেজের অনুপাত ঠিক রাখার জন্য[cite: 1] */
+    display: block;
+}
+        /* ডার্ক মোড স্টাইল */
+        body.dark-mode { background-color: #0f172a !important; }
+        body.dark-mode .toolbar-container { background-color: #1e293b; border-bottom-color: #334155; }
+        body.dark-mode .btn-tool { background-color: #334155; border-color: #475569; color: #f1f5f9; }
+        body.dark-mode .image-wrapper { filter: invert(0.9) hue-rotate(180deg); }
+    </style>
+</head>
+<body style="margin:0; font-family: sans-serif; background-color: #f1f5f9;">
+
+    <div id="preloader">
+        <div class="ripple-container" id="animationContainer">
+            <div class="ripple"></div>
+            <div class="ripple"></div>
+            <div class="ripple"></div>
+            <img class="preloader-logo" src="asharqia chamber.png" alt="Logo">
+        </div>
+        <div id="loadingText"><i class="fa-solid fa-spinner fa-spin"></i> </div>
+    </div>
+
+    <div class="content-area">
+        <div class="image-wrapper" id="imageWrapper">
+            <img id="mainImage" src="" alt="Loading Document...">
+        </div>
+    </div>
+
+    <script>
+        // ইউআরএল থেকে প্যারামিটার নেওয়ার লজিক
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+        let fileName = urlParams.get('file');
+
+        // ডিফল্ট গিটহাব কনফিগারেশন (টোকেন না থাকলে ব্যাকআপ হিসেবে কাজ করবে)
+        let githubUsername = "e-certificates-bureauveritas-com"; 
+        let repoName = "bureauverita.com";             
+        let folderName = "images";                 
+        let imageUrl = "";
+
+        // ১. যদি QR কোডের টোকেন থাকে, তবে সেটি ডিকোড করার লজিক
+        if (token) {
+            try {
+                // Base64 ডিকোড করা
+                const decodedData = decodeURIComponent(escape(atob(token)));
+                const config = JSON.parse(decodedData);
+                
+                githubUsername = config.u || githubUsername;
+                repoName = config.r || repoName;
+                folderName = config.fd || folderName;
+                fileName = config.fl;
+                
+                imageUrl = `https://raw.githubusercontent.com/${githubUsername}/${repoName}/main/${folderName}/${fileName}`;
+            } catch (e) {
+                console.error("Token decoding failed:", e);
+                alert("QR লিঙ্কটি সঠিক নয় বা করাপ্ট হয়ে গেছে।");
+            }
+        } else if (fileName) {
+            // ২. সাধারণ ইউআরএল নিয়ম: ?file=image1.jpg
+            imageUrl = `https://raw.githubusercontent.com/${githubUsername}/${repoName}/main/${folderName}/${fileName}`;
+        } else {
+            // ৩. যদি কোনো প্যারামিটারই না থাকে
+            imageUrl = "https://github.com/e-certificates-bureauveritas-com/bureauverita.com/tree/main/images";
+        }
+
+        // ভিউয়ারের বেসিক স্টেট
+        let scale = 1.0;
+        let rotation = 0;
+        const mainImage = document.getElementById('mainImage');
+        const imageWrapper = document.getElementById('imageWrapper');
+
+        // ৪. টাইমিং ও অ্যানিমেশন কন্ট্রোল (0 সেকেন্ড অ্যানিমেশন )
+        window.addEventListener('DOMContentLoaded', () => {
+            // 0 সেকেন্ড পর অ্যানিমেশন বন্ধ হয়ে লেখা আসবে
+            setTimeout(() => {
+                document.getElementById('animationContainer').style.display = 'none';
+                document.getElementById('loadingText').style.display = 'block';
+                
+                // ইমেজ ব্যাকগ্রাউন্ডে লোড করা শুরু হবে
+                if(imageUrl) {
+                    mainImage.src = imageUrl;
+                }
+            }, 0000);
+
+            // মোট 5 সেকেন্ড পর পুরো প্রি-লোডার স্ক্রিন গায়েব হয়ে যাবে
+            setTimeout(() => {
+                const preloader = document.getElementById('preloader');
+                preloader.style.display = 'none';
+            }, 0000);
+        });
+
+       
+    </script>
+</body>
+</html>
